@@ -1,0 +1,48 @@
+name: Ultimate Bot Deployment
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    environment: production
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+          submodules: false  # ⚡️ disabled karena submodule sudah dihapus
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Set bot tokens and IDs
+        run: |
+          echo "TOKEN_NASABAH=${{ secrets.TOKEN_NASABAH }}" >> $GITHUB_ENV
+          echo "TOKEN_ABSENSI=${{ secrets.TOKEN_ABSENSI }}" >> $GITHUB_ENV
+          echo "DATA_GROUP_ID=${{ secrets.DATA_GROUP_ID }}" >> $GITHUB_ENV
+          echo "ABSEN_GROUP_ID=${{ secrets.ABSEN_GROUP_ID }}" >> $GITHUB_ENV
+          echo "ADMIN_IDS=${{ secrets.ADMIN_IDS }}" >> $GITHUB_ENV
+
+      - name: Run Ultimate Bot (auto-restart)
+        run: |
+          echo "🚀 Starting Ultimate Bot..."
+          while true; do
+            python ultimate.py
+            echo "⚠️ Bot crashed. Restarting in 5s..."
+            sleep 5
+          done

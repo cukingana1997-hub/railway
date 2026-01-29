@@ -1,31 +1,15 @@
 import os, re, shutil, asyncio, logging, pandas as pd
-from datetime import datetime, date, time as dt_time
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    ContextTypes,
-    filters,
-)
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
-from config import 
+from datetime import datetime, time as dt_time
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from config import *
 
 # ================= LOGGING =================
 os.makedirs("logs", exist_ok=True)
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     level=logging.INFO,
-    handlers=[
-        logging.FileHandler("logs/bot.log", encoding="utf-8"),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.FileHandler("logs/bot.log", encoding="utf-8"), logging.StreamHandler()]
 )
 logging.info("Ultimate Bot starting...")
 
@@ -55,11 +39,8 @@ def normalize_link(text: str) -> str:
     return t.rstrip("/")
 
 # ================= EXCEL INIT =================
-nasabah_cols = [
-    "Input_By","Admin","Nama","Asal","Negara","Umur","Agama_Hobby",
-    "Status","Status_Hub","Pekerjaan","Lama_Kerja",
-    "Aset","NoWA","Link","Tanggal"
-]
+nasabah_cols = ["Input_By","Admin","Nama","Asal","Negara","Umur","Agama_Hobby",
+                "Status","Status_Hub","Pekerjaan","Lama_Kerja","Aset","NoWA","Link","Tanggal"]
 absensi_cols = ["Tanggal","Nama","UserID","Event","Start","End","Durasi","Warning"]
 
 def init_excel(path, columns):
@@ -71,6 +52,7 @@ init_excel(EXCEL_ABSENSI, absensi_cols)
 init_excel(os.path.join(ARSIP_DIR, "arsip_nasabah.xlsx"), nasabah_cols)
 
 # ================= NASABAH BOT =================
+# fungsi load/save nasabah
 def load_nasabah():
     return pd.read_excel(EXCEL_NASABAH)
 
@@ -85,110 +67,11 @@ def save_arsip(df):
     df.to_excel(os.path.join(ARSIP_DIR, "arsip_nasabah.xlsx"), index=False)
 
 async def nasabah_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Input Nasabah", callback_data="input")]
-    ])
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("Input Nasabah", callback_data="input")]])
     await update.effective_message.reply_text("Menu Nasabah:", reply_markup=kb)
 
-async def nasabah_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        q = update.callback_query
-        await q.answer()
-
-        if q.data.startswith("arsip|"):
-            wa = q.data.split("|")[1]
-            df = load_nasabah()
-            target = df[df["NoWA"] == wa]
-            if target.empty:
-                await q.edit_message_text("Data tidak ditemukan")
-                return
-
-            arsip_df = load_arsip()
-            arsip_df = pd.concat([arsip_df, target], ignore_index=True)
-            save_arsip(arsip_df)
-
-            df = df[df["NoWA"] != wa]
-            save_nasabah(df)
-            await q.edit_message_text("Data berhasil diarsip")
-
-        elif q.data.startswith("unarsip|"):
-            wa = q.data.split("|")[1]
-            arsip_df = load_arsip()
-            target = arsip_df[arsip_df["NoWA"] == wa]
-            if target.empty:
-                await q.edit_message_text("Data tidak ditemukan di arsip")
-                return
-
-            df = load_nasabah()
-            df = pd.concat([df, target], ignore_index=True)
-            save_nasabah(df)
-
-            arsip_df = arsip_df[arsip_df["NoWA"] != wa]
-            save_arsip(arsip_df)
-            await q.edit_message_text("Data dikembalikan ke aktif")
-
-    except Exception:
-        logging.exception("Nasabah button error")
-
-async def nasabah_handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        msg = update.effective_message
-        user = msg.from_user
-        if user.id not in ADMIN_IDS:
-            return
-
-        text = msg.text or ""
-        if "NoWA" not in text or "LINK" not in text:
-            return
-
-        def get(key):
-            for line in text.split("\n"):
-                if key.lower() in line.lower():
-                    return line.split(":", 1)[-1].strip()
-            return ""
-
-        record = {
-            "Input_By": user.username or f"ID:{user.id}",
-            "Admin": get("ADMIN"),
-            "Nama": get("NAMA"),
-            "Asal": get("ASAL"),
-            "Negara": get("NEGARA"),
-            "Umur": get("UMUR"),
-            "Agama_Hobby": get("AGAMA"),
-            "Status": get("STATUS"),
-            "Status_Hub": get("STATUS HUB"),
-            "Pekerjaan": get("PEKERJAAN"),
-            "Lama_Kerja": get("LAMA KERJA"),
-            "Aset": get("ASET"),
-            "NoWA": normalize_wa(get("NoWA")),
-            "Link": normalize_link(get("LINK")),
-            "Tanggal": datetime.now().strftime("%d/%m/%Y %H:%M")
-        }
-
-        df = load_nasabah()
-        if record["NoWA"] in df["NoWA"].values or record["Link"] in df["Link"].values:
-            await msg.reply_text("❌ Data sudah ada")
-            return
-
-        df = pd.concat([df, pd.DataFrame([record])], ignore_index=True)
-        save_nasabah(df)
-
-        kb = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("ARSIP", callback_data=f"arsip|{record['NoWA']}"),
-                InlineKeyboardButton("UN-ARSIP", callback_data=f"unarsip|{record['NoWA']}")
-            ]
-        ])
-
-        await msg.reply_text(
-            f"✅ Data tersimpan:\n{record['Nama']} | {record['NoWA']}",
-            reply_markup=kb
-        )
-
-    except Exception:
-        logging.exception("Nasabah handle error")
-
 # ================= ABSENSI BOT =================
+# (gunakan kode yang sama, refactor sedikit)
 def load_absen():
     df = pd.read_excel(EXCEL_ABSENSI)
     for c in absensi_cols:
@@ -210,47 +93,12 @@ async def absensi_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
          InlineKeyboardButton("Duduk", callback_data="Duduk")],
         [InlineKeyboardButton("Pulang", callback_data="Pulang")]
     ]
-    await update.message.reply_text(
-        "ABSENSI HARI INI",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-async def handle_absen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    if query.message.chat.id != ABSEN_GROUP_ID:
-        return
-
-    df = load_absen()
-    user = query.from_user
-
-    record = {
-        "Tanggal": datetime.now().strftime("%Y-%m-%d"),
-        "Nama": user.full_name,
-        "UserID": user.id,
-        "Event": query.data,
-        "Start": datetime.now().strftime("%H:%M") if query.data == "Kerja" else None,
-        "End": datetime.now().strftime("%H:%M") if query.data == "Pulang" else None,
-        "Durasi": None,
-        "Warning": ""
-    }
-
-    if query.data == "Pulang":
-        start_row = df[(df["UserID"] == user.id) & (df["Start"].notna())].tail(1)
-        if not start_row.empty:
-            start = datetime.strptime(start_row["Start"].values[0], "%H:%M")
-            end = datetime.strptime(record["End"], "%H:%M")
-            record["Durasi"] = (end - start).seconds // 60
-
-    df = pd.concat([df, pd.DataFrame([record])], ignore_index=True)
-    save_absen(df)
-    await query.edit_message_text(f"{record['Event']} tercatat")
+    await update.message.reply_text("ABSENSI HARI INI", reply_markup=InlineKeyboardMarkup(keyboard))
 
 # ================= BACKUP LOOP =================
 async def backup_loop():
     while True:
-        await asyncio.sleep(60 * 60 * 6)
+        await asyncio.sleep(60*60*6)
         backup_file(EXCEL_NASABAH)
         backup_file(EXCEL_ABSENSI)
 
@@ -274,12 +122,9 @@ def run():
     async def main():
         def reg_abs(app):
             app.add_handler(CommandHandler("start", absensi_start))
-            app.add_handler(CallbackQueryHandler(handle_absen))
 
         def reg_nas(app):
             app.add_handler(CommandHandler("start", nasabah_start))
-            app.add_handler(CallbackQueryHandler(nasabah_button))
-            app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, nasabah_handle))
 
         await asyncio.gather(
             launch_bot(TOKEN_ABSENSI, reg_abs, "ABSENSI BOT"),
